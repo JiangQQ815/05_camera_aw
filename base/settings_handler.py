@@ -4,9 +4,10 @@
 """
 import time
 import logging
-from typing import Protocol, Dict, Any
+from typing import Protocol, Dict, Any, Optional
 
 from config.locators import *
+from base.ui_element import UIElementOperations
 
 
 class SettingsHandlerProtocol(Protocol):
@@ -26,12 +27,22 @@ class SettingsHandlerProtocol(Protocol):
     def set_ev(self, value: str) -> None: ...
 
 
-class SettingsHandler:
+class SettingsHandler(UIElementOperations):
     """
     设置处理器实现
 
     封装所有相机参数设置操作，提供统一接口
+
+    注意: _is_settings_open 状态追踪是最佳努力机制，
+    可能因 atx-agent 死亡或相机崩溃而失去同步。
+    使用 try/finally 确保操作后状态重置。
     """
+
+    SETTINGS_ENTRIES = [
+        SETTING_FLASH, SETTING_HDR, SETTING_ASPECT_RATIO, SETTING_TIMER,
+        SETTING_AI, SETTING_WATERMARK, SETTING_BEAUTY, SETTING_ISO,
+        SETTING_WB, SETTING_AF, SETTING_EV
+    ]
 
     def __init__(self, driver):
         """
@@ -39,69 +50,78 @@ class SettingsHandler:
         :param driver: uiautomator2 的 d 对象
         """
         self.d = driver
+        super().__init__()
         self.logger = logging.getLogger("SettingsHandler")
         self._is_settings_open = False
 
-    # ============================================
-    # 基础操作
-    # ============================================
+    def _verify_settings_open(self) -> bool:
+        """
+        验证设置菜单是否真正打开（检测状态同步失败）
 
-    def _find_element(self, locator: Dict, timeout: float = 5) -> bool:
-        """查找元素是否存在"""
-        try:
-            if locator.get("resource_id"):
-                self.d(resource_id=locator["resource_id"]).wait(timeout=timeout)
-                return self.d(resource_id=locator["resource_id"]).exists()
-            elif locator.get("xpath"):
-                self.d.xpath(locator["xpath"]).wait(timeout=timeout)
-                return self.d.xpath(locator["xpath"]).exists()
-            return False
-        except Exception:
-            return False
+        Returns:
+            bool: 设置菜单是否打开
+        """
+        # 检查设置菜单中的任一元素是否存在
+        for entry in self.SETTINGS_ENTRIES:
+            if self._find_element(entry, timeout=0.5):
+                return True
+        return False
 
-    def _click_element(self, locator: Dict, timeout: float = 5) -> bool:
-        """点击元素"""
-        try:
-            if locator.get("resource_id"):
-                self.d(resource_id=locator["resource_id"]).click(timeout=timeout)
-                return True
-            elif locator.get("xpath"):
-                self.d.xpath(locator["xpath"]).click(timeout=timeout)
-                return True
-            return False
-        except Exception as e:
-            self.logger.error(f"点击元素失败: {locator.get('desc', 'unknown')}, error: {e}")
-            raise
+    def _sync_settings_state(self) -> bool:
+        """
+        同步设置状态
+
+        Returns:
+            bool: 当前设置菜单是否打开
+        """
+        actual_state = self._verify_settings_open()
+        if self._is_settings_open and not actual_state:
+            self.logger.warning("检测到设置状态不同步: 状态为打开但实际已关闭")
+            self._is_settings_open = False
+        elif not self._is_settings_open and actual_state:
+            self.logger.warning("检测到设置状态不同步: 状态为关闭但实际已打开")
+            self._is_settings_open = True
+        return actual_state
 
     def _open_settings_if_needed(self):
         """打开设置菜单（如果当前不在设置界面）"""
-        if self._is_settings_open:
-            return
+        if self._sync_settings_state():
+            return  # 已经打开
+
         if not self._find_element(SETTING_ICON, timeout=1):
             return
-        self._click_element(SETTING_ICON)
-        time.sleep(0.5)
-        self._is_settings_open = True
+
+        try:
+            self._click_element(SETTING_ICON)
+            time.sleep(0.5)
+            self._is_settings_open = self._verify_settings_open()
+        except Exception as e:
+            self.logger.error(f"打开设置菜单失败: {e}")
+            self._is_settings_open = self._verify_settings_open()
+            raise
 
     def _close_settings(self):
         """关闭设置菜单"""
-        if not self._is_settings_open:
+        if not self._sync_settings_state():
             return
+
         try:
             if self._find_element(BACK_BUTTON, timeout=1):
                 self._click_element(BACK_BUTTON)
             elif self._find_element(CLOSE_BUTTON, timeout=1):
                 self._click_element(CLOSE_BUTTON)
             time.sleep(0.3)
-            self._is_settings_open = False
-        except:
-            pass
+        except Exception as e:
+            self.logger.warning(f"关闭设置菜单时出错: {e}")
+        finally:
+            # 无论成功与否，验证实际状态
+            self._is_settings_open = self._verify_settings_open()
 
     def open(self):
         """显式打开设置菜单"""
         self._click_element(SETTING_ICON)
         time.sleep(0.5)
-        self._is_settings_open = True
+        self._is_settings_open = self._verify_settings_open()
 
     def close(self):
         """关闭设置菜单"""
@@ -141,14 +161,15 @@ class SettingsHandler:
         time.sleep(0.3)
 
         aspect_options = {
-            "4:3": {"text": "4:3"},
-            "16:9": {"text": "16:9"},
-            "1:1": {"text": "1:1"},
+            "4:3": {"text": "4:3", "desc": "画幅4:3"},
+            "16:9": {"text": "16:9", "desc": "画幅16:9"},
+            "1:1": {"text": "1:1", "desc": "画幅1:1"},
         }
 
         option = aspect_options.get(value)
         if option:
-            self.d(text=option["text"]).click()
+            # 使用带重试机制的点击（避免 atx-agent 死亡导致失败）
+            self._click_element({"text": option["text"], "desc": option["desc"]})
             self.logger.info(f"画幅设置为: {value}")
         time.sleep(0.3)
 
@@ -178,11 +199,28 @@ class SettingsHandler:
         self.logger.info(f"AI设置为: {value}")
 
     def _get_ai_state(self) -> bool:
-        """获取AI当前状态"""
+        """
+        获取AI摄影大师当前状态
+
+        通过检查元素的 selected 属性或 content-desc 判断是否开启
+
+        Returns:
+            bool: AI 是否已开启
+        """
         try:
-            ai_element = self.d(resource_id=SETTING_AI["resource_id"])
+            ai_element = self.d(resourceId=SETTING_AI["resource_id"])
+            # 尝试获取 selected 状态（ToggleButton 的选中状态）
+            if hasattr(ai_element, 'selected'):
+                return bool(ai_element.selected)
+            # 备选：检查 content-desc 是否包含 "开启" 或 "on"
+            info = ai_element.info
+            if info:
+                content_desc = info.get('contentDescription', '') or ''
+                text = info.get('text', '') or ''
+                return '开' in content_desc or 'on' in content_desc.lower() or '开启' in text
             return False
-        except:
+        except Exception as e:
+            self.logger.debug(f"获取AI状态失败: {e}")
             return False
 
     def set_watermark(self, value: str):
@@ -204,7 +242,8 @@ class SettingsHandler:
 
         iso_options = ["自动", "100", "200", "400", "800", "1600", "3200"]
         if value in iso_options:
-            self.d(text=value).click()
+            # 使用带重试机制的点击（避免 atx-agent 死亡导致失败）
+            self._click_element({"text": value, "desc": f"ISO_{value}"})
             self.logger.info(f"ISO设置为: {value}")
         time.sleep(0.3)
 
@@ -215,7 +254,8 @@ class SettingsHandler:
 
         wb_options = ["自动", "白炽灯", "日光", "阴天", "荧光灯"]
         if value in wb_options:
-            self.d(text=value).click()
+            # 使用带重试机制的点击（避免 atx-agent 死亡导致失败）
+            self._click_element({"text": value, "desc": f"WB_{value}"})
             self.logger.info(f"白平衡设置为: {value}")
         time.sleep(0.3)
 
@@ -226,7 +266,8 @@ class SettingsHandler:
 
         af_options = ["自动", "手动"]
         if value in af_options:
-            self.d(text=value).click()
+            # 使用带重试机制的点击（避免 atx-agent 死亡导致失败）
+            self._click_element({"text": value, "desc": f"AF_{value}"})
             self.logger.info(f"对焦模式设置为: {value}")
         time.sleep(0.3)
 

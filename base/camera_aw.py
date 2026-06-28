@@ -10,9 +10,10 @@ from config.locators import *
 from config.modes import get_mode_config
 from base.settings_handler import SettingsHandler, create_settings_handler
 from base.media_verifier import MediaVerifier, create_media_verifier
+from base.ui_element import UIElementOperations
 
 
-class CameraAutomationAW:
+class CameraAutomationAW(UIElementOperations):
     """相机自动化动作字库"""
 
     def __init__(self, driver):
@@ -21,6 +22,7 @@ class CameraAutomationAW:
         :param driver: uiautomator2 的 d 对象
         """
         self.d = driver
+        super().__init__()
         self.logger = logging.getLogger("CameraAW")
         self._current_facing = "后置"  # 默认后置
         self._current_mode = "拍照"  # 默认拍照模式
@@ -40,68 +42,6 @@ class CameraAutomationAW:
         if self._media_verifier is None:
             self._media_verifier = create_media_verifier(self.d)
         return self._media_verifier
-
-    # ============================================
-    # 基础操作
-    # ============================================
-
-    def _find_element(self, locator: Dict, timeout: float = 5) -> bool:
-        """查找元素是否存在"""
-        try:
-            if locator.get("resource_id"):
-                self.d(resource_id=locator["resource_id"]).wait(timeout=timeout)
-                return self.d(resource_id=locator["resource_id"]).exists()
-            elif locator.get("xpath"):
-                self.d.xpath(locator["xpath"]).wait(timeout=timeout)
-                return self.d.xpath(locator["xpath"]).exists()
-            return False
-        except Exception as e:
-            self.logger.warning(f"查找元素失败: {locator.get('desc', 'unknown')}, error: {e}")
-            return False
-
-    def _click_element(self, locator: Dict, timeout: float = 5) -> bool:
-        """点击元素"""
-        try:
-            if locator.get("resource_id"):
-                self.d(resource_id=locator["resource_id"]).click(timeout=timeout)
-                return True
-            elif locator.get("xpath"):
-                self.d.xpath(locator["xpath"]).click(timeout=timeout)
-                return True
-            return False
-        except Exception as e:
-            self.logger.error(f"点击元素失败: {locator.get('desc', 'unknown')}, error: {e}")
-            raise
-
-    def _long_click_element(self, locator: Dict, duration: float = 1.0) -> bool:
-        """长按元素"""
-        try:
-            if locator.get("resource_id"):
-                self.d(resource_id=locator["resource_id"]).long_click(duration=duration)
-                return True
-            return False
-        except Exception as e:
-            self.logger.error(f"长按元素失败: {locator.get('desc', 'unknown')}, error: {e}")
-            raise
-
-    def _swipe(self, start_x: int, start_y: int, end_x: int, end_y: int, duration: float = 0.5):
-        """滑动屏幕"""
-        try:
-            self.d.swipe(start_x, start_y, end_x, end_y, duration=duration)
-        except Exception as e:
-            self.logger.error(f"滑动失败: {e}")
-            raise
-
-    def _get_element_text(self, locator: Dict) -> Optional[str]:
-        """获取元素文本"""
-        try:
-            if locator.get("resource_id"):
-                return self.d(resource_id=locator["resource_id"]).get_text()
-            elif locator.get("xpath"):
-                return self.d.xpath(locator["xpath"]).get_text()
-        except:
-            return None
-        return None
 
     # ============================================
     # AW: 切换前后置摄像头
@@ -342,7 +282,7 @@ class CameraAutomationAW:
                     self.logger.error(f"检测到相机ANR: {pattern}")
                     return True
             return False
-        except:
+        except Exception:
             return False
 
     # ============================================
