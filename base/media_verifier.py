@@ -158,7 +158,7 @@ class MediaVerifier:
                 pass  # ffprobe不可用时跳过时长验证
 
             size_mb = size // (1024 * 1024)
-            self.logger.info(f"视频验证通过: {file_path} ({size_mb}MB, {duration or '?s})")
+            self.logger.info(f"视频验证通过: {file_path} ({size_mb}MB, {duration or '?'}s)")
             return VerificationResult(
                 success=True,
                 file_path=file_path,

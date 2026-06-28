@@ -9,6 +9,7 @@ from typing import Optional, Dict, Any, List
 from config.locators import *
 from config.modes import get_mode_config
 from base.settings_handler import SettingsHandler, create_settings_handler
+from base.media_verifier import MediaVerifier, create_media_verifier
 
 
 class CameraAutomationAW:
@@ -24,6 +25,7 @@ class CameraAutomationAW:
         self._current_facing = "后置"  # 默认后置
         self._current_mode = "拍照"  # 默认拍照模式
         self._settings_handler: Optional[SettingsHandler] = None
+        self._media_verifier: Optional[MediaVerifier] = None
 
     @property
     def settings(self) -> SettingsHandler:
@@ -31,6 +33,13 @@ class CameraAutomationAW:
         if self._settings_handler is None:
             self._settings_handler = create_settings_handler(self.d)
         return self._settings_handler
+
+    @property
+    def media_verifier(self) -> MediaVerifier:
+        """获取媒体验证器（延迟创建）"""
+        if self._media_verifier is None:
+            self._media_verifier = create_media_verifier(self.d)
+        return self._media_verifier
 
     # ============================================
     # 基础操作
@@ -341,14 +350,28 @@ class CameraAutomationAW:
     # ============================================
 
     def verify_photo_saved(self, min_size_kb: int = 10) -> bool:
-        """AW: 验证照片已保存到相册"""
+        """
+        AW: 验证照片已保存到相册
+        :param min_size_kb: 最小文件大小(KB)
+        :return: bool 验证是否通过
+        """
         self.logger.info("验证照片文件...")
-        return True
+        result = self.media_verifier.verify_photo_saved(min_size_kb)
+        if not result.success:
+            self.logger.warning(f"照片验证失败: {result.error}")
+        return result.success
 
     def verify_video_saved(self, min_duration_sec: int = 1) -> bool:
-        """AW: 验证视频已保存到相册"""
+        """
+        AW: 验证视频已保存到相册
+        :param min_duration_sec: 最小视频时长(秒)
+        :return: bool 验证是否通过
+        """
         self.logger.info("验证视频文件...")
-        return True
+        result = self.media_verifier.verify_video_saved(min_duration_sec)
+        if not result.success:
+            self.logger.warning(f"视频验证失败: {result.error}")
+        return result.success
 
     # ============================================
     # AW: 辅助操作
